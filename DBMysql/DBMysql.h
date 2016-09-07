@@ -39,18 +39,14 @@ class DBMysql
     vector<string> fields; //返回查询结果的列
     bool boConnected;
 
-	string so_file_name;
-	int net_read_timeout;
-    int net_write_timeout;
-    int connect_timeout;
+    string sConnectedRunSQL;
 
     void disPlayError();
-	bool init_connect();
-	void init();
+    void init();
   public:
-    DBMysql(const string &host, const string &user, const string &password, unsigned int port);   // 构造函数
+    DBMysql(const string &host, const string &user, const string &password, unsigned int port, const string &ConnectedRunSQL = "");   // 构造函数
     DBMysql(); //构造函数
-    void SetConnect(const string &host, const string &user, const string &password, unsigned int port);    //确定连接参数
+    void SetConnect(const string &host, const string &user, const string &password, unsigned int port, const string &ConnectedRunSQL = "");  //确定连接参数
     unsigned int DBConnect();//连接数据库
     void DBDisconnect();//关闭连接
     unsigned int DBSelect(const string &db);  //连接一个数据库
@@ -66,23 +62,36 @@ class DBMysql
     unsigned int UpdateData(const string &table, strMap &data, const string &condition, bool AutoQuotes = true);   //根据条件修改一条数据
     unsigned int DeleteData(const string &table, const string &condition);   //根据条件删除数据
 
-    bool Connected() {return boConnected;}
-    string getHost() {return host;}
-    string getUser() {return user;}
-    string getPassword() {return password;}
-    unsigned int getPort() {return port;}
+    bool Connected()
+    {
+      return boConnected;
+    }
+    string getHost()
+    {
+      return host;
+    }
+    string getUser()
+    {
+      return user;
+    }
+    string getPassword()
+    {
+      return password;
+    }
+    unsigned int getPort()
+    {
+      return port;
+    }
+    string getConnectedRunSQL()
+    {
+      return sConnectedRunSQL;  //设置一旦连接成就执行的SQL语句 一般是 Set NAMES 'utf8' 这样的语句
+    }
+    void setConnectedRunSQL(const string &s)
+    {
+      sConnectedRunSQL = s;
+    }
 
-	inline void setSoFileName(const string &filename){ so_file_name = filename; }
-	inline string getSoFileName(){ return so_file_name; }
-	
-	inline void setNetReadTimeOut(int timeout){ net_read_timeout = timeout; }
-	inline int getNetReadTimeOut(){ return net_read_timeout; }
-
-	inline void setNetWriteTimeOut(int timeout){ net_write_timeout = timeout; }
-	inline int getNetWriteTimeOut(){ return net_write_timeout; }
-
-	inline void setConnectTimeOut(int timeout){ connect_timeout = timeout; }
-	inline int getConnectTimeOut(){ return connect_timeout; }
+	void clearGetData();//清除获取到的数据
 
     string EscapeString(const string &Str);//安全转义过滤函数
 

@@ -3,74 +3,105 @@
 #include "DBMysql.h"
 #include <assert.h>
 #include <mutex>
+#include <dlfcn.h>
+
+#define ABSPATH "/usr/lib64"
 
 std::mutex g_mysql_mutex;
 
-/*构造函数，设定连接的服务器，用户名，密码和端口*/
-DBMysql::DBMysql(const string &host, const string &user, const string &password, unsigned int port = 3306)
+void DBMysql::init()
 {
-  std::lock_guard<std::mutex> lock(g_mysql_mutex);
+  //std::lock_guard<std::mutex> lock(g_mysql_mutex);
+  mysql = NULL;
   boConnected = false;
-  mysql = mysql_init(NULL);
+  myd_real_connect = nullptr;
+  
   num = 0;
   error = "";
   error_no = 0;
   query = "";
   result = NULL;
-  SetConnect(host, user, password, port);
+  
+  handle = dlopen(ABSPATH "/libmysqlclient_r.so", RTLD_NOW | RTLD_DEEPBIND);
+  if (!handle)
+    {
+      error_no = 1;
+      error = "Failed to open:" ABSPATH "/libmysqlclient_r.so";
+    }
+    else{
+          myd_real_connect=dlsym(handle, "mysql_real_connect");
+          if (!myd_real_connect)
+             {
+               error_no = 2;
+               error = "Failed to load symbol mysql_real_connect";
+              }
+        }
 }
+
+/*构造函数，设定连接的服务器，用户名，密码和端口*/
+DBMysql::DBMysql(const string &host, const string &user, const string &password, unsigned int port = 3306, const string &ConnectedRunSQL)
+{
+  init();
+  SetConnect(host, user, password, port, ConnectedRunSQL);
+}
+
 DBMysql::DBMysql()
 {
-  std::lock_guard<std::mutex> lock(g_mysql_mutex);
-  boConnected = false;
-  mysql = mysql_init(NULL);
-  num = 0;
-  error = "";
-  error_no = 0;
-  query = "";
-  result = NULL;
+  init();
   SetConnect("", "", "", 3306);
 }
 /*设定连接的服务器，用户名，密码和端口*/
-void DBMysql::SetConnect(const string &host, const string &user, const string &password, unsigned int port)
+void DBMysql::SetConnect(const string &host, const string &user, const string &password, unsigned int port, const string &ConnectedRunSQL)
 {
-  if (boConnected)
-    {
-      DBDisconnect();
-    }
+  if (boConnected) { DBDisconnect(); }
   DBMysql::host = host;
   DBMysql::user = user;
   DBMysql::password = password;
   DBMysql::port = port;
+  sConnectedRunSQL = ConnectedRunSQL;
 }
 /*连接数据库*/
 unsigned int DBMysql::DBConnect()
 {
   //std::lock_guard<std::mutex> lock(g_mysql_mutex);
   MYSQL *con;
+  mysql = mysql_init(NULL);
   if(mysql == NULL)
     {
-      error = "初始化mysql错误";
+      error = "mysql info is null";
       error_no = 1;
       boConnected = false;
       return 1;
     }
-  if (boConnected)
-    {
-      DBDisconnect();
-    }
-  con = mysql_real_connect(mysql, host.c_str(), user.c_str(), password.c_str(), NULL, port, NULL, 0);
+  if (boConnected) { DBDisconnect();}
+  con = ((MYSQL *(*)(MYSQL *,const char *,const char *,const char *,const char *,unsigned int,const char *,unsigned long))myd_real_connect)
+  	    (mysql, host.c_str(), user.c_str(), password.c_str(), NULL, port, NULL, 0);
+  //con = mysql_real_connect(mysql, host.c_str(), user.c_str(), password.c_str(), NULL, port, NULL, 0);
   if(con == NULL)
     {
       boConnected = false;
       error = mysql_error(mysql);
       error_no = mysql_errno(mysql);
-	  mysql = mysql_init(NULL);
+      std::lock_guard<std::mutex> lock(g_mysql_mutex);
+      mysql = mysql_init(NULL);
       return error_no;
     }
   else
     {
       boConnected = true;
+      if (!sConnectedRunSQL.empty())
+        {
+          if (DBQuery(sConnectedRunSQL) != 0)
+            {
+              boConnected = false;
+              error = mysql_error(mysql);
+              error_no = mysql_errno(mysql);
+              std::lock_guard<std::mutex> lock(g_mysql_mutex);
+              mysql = mysql_init(NULL);
+              return error_no;
+            }
+        }
+
     }
   return 0;
 }
@@ -128,6 +159,13 @@ unsigned int DBMysql::DBQuery(const string &q)
     {
       mysql_free_result(result);
     }
+
+  while (!mysql_next_result(mysql))
+    {
+      result = mysql_store_result(mysql);
+      mysql_free_result(result);
+    }
+
   query = q;
   re = mysql_query(mysql, query.c_str());
   if(re == 0)
@@ -153,7 +191,7 @@ unsigned int DBMysql::DBQuery(const string &q)
 strMap DBMysql::GetInfo()
 {
   MYSQL_ROW row;
-  unsigned int i;  
+  unsigned int i;
   if(info.size() > 0)
     {
       return info;
@@ -394,6 +432,26 @@ vector<string> DBMysql::GetFields()
   return fields;
 }
 
+void DBMysql::clearGetData()//清除获取到的数据
+{
+  error = ""; //错误提示信息
+  error_no = 0;//错误编码
+  info.clear(); //查询语句返回一条结果
+  arrInfo.clear(); //查询语句可能会返回多条结果
+  fields.clear(); //返回查询结果的列
+  if (result != NULL)
+    {
+      mysql_free_result(result);
+	  result = NULL;
+    }
+  while (!mysql_next_result(mysql))
+    {
+      result = mysql_store_result(mysql);
+      mysql_free_result(result);
+    }
+}
+
+
 /*安全转义过滤函数*/
 std::string DBMysql::EscapeString(const string &Str)
 {
@@ -412,6 +470,11 @@ DBMysql::~DBMysql()
     {
       mysql_free_result(result);
     }
+  while (!mysql_next_result(mysql))
+    {
+      result = mysql_store_result(mysql);
+      mysql_free_result(result);
+    }
   fields.clear();
   error = "";
   error_no = 0;
@@ -419,4 +482,6 @@ DBMysql::~DBMysql()
   db = "";
   arrInfo.clear();
   mysql_close(mysql);
+  myd_real_connect = nullptr;
+  handle = nullptr;
 }

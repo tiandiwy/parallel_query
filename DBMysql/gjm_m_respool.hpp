@@ -7,7 +7,11 @@
 #include <string>
 #include <queue>
 #include <vector>
-#include <unistd.h>
+
+#ifdef _MSC_VER
+#else
+  #include <unistd.h>
+#endif
 //---------------------------------------------------------------------------
 //---------------------------------------------------------------------------
 using namespace std;
@@ -173,12 +177,12 @@ class gjm_m_respool
       return re;
     }
 
-	bool del_one_idleres(void)//删除一个空闲资源
+    bool del_one_idleres(void)//删除一个空闲资源
     {
       if (idleres.size() > 0)//有足够的空闲资源
         {
           res *re = idleres.front();
-          if (re!=nullptr)
+          if (re != nullptr)
             {
               try
                 {
@@ -200,9 +204,7 @@ class gjm_m_respool
     {
       bool boRE = false;
       //std::lock_guard<std::mutex> lock(write_mutex);//拿到释放资源锁
-      //deque<res *>::iterator it;
       auto it = useres.begin();
-      //deque<res *>::iterator it_end = useres.end();
       auto it_end = useres.end();
       for (; it != it_end; it++)//开始遍历r 是否在useres中
         {
@@ -227,6 +229,30 @@ class gjm_m_respool
             }
         }
       return boRE;
+    }
+
+    void clear_idle(void)//清空空闲资源
+    {
+      max = 0;
+      res *re = nullptr;
+      int iC = idleres.size();
+      for (int i = 0; i < iC; i++)
+        {
+          re = idleres.front();
+          idleres.pop();
+          if (re != nullptr)
+            {
+              try
+                {
+                  delete re;
+                  re = nullptr;
+                }
+              catch (...)
+                {
+                  re = nullptr;
+                }
+            }
+        }      
     }
 };
 //---------------------------------------------------------------------------

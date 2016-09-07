@@ -98,6 +98,19 @@ class DBMysql_Pool
       return idleres;
     }
 
+    void clear_idle(void)//清空空闲资源
+    {
+      max = 0;
+      for (auto &kv : Pool)
+        {
+          if (kv.second != nullptr)
+            {
+              kv.second->clear_idle();
+            }
+        }
+      Pool.clear();
+    }
+
     inline unsigned int use_count(void)//当前使用中资源数量
     {
       unsigned int useres = 0;
@@ -111,13 +124,13 @@ class DBMysql_Pool
     void setmax(unsigned int new_max)//设置最大资源数
     {
       std::lock_guard<std::mutex> lock(write_mutex);//只需要锁一道就可以了，因为本函数在发现没有空闲资源只需退出即可，无需等待新的资源
+
       for (auto &kv : Pool)
         {
           kv.second->setmax(new_max);//让每个子资源池与父资源池总容量相同
         }
       max = new_max;
     }
-
     inline unsigned int getmax(void)
     {
       return max; //获取最大资源数
@@ -128,10 +141,13 @@ class DBMysql_Pool
       max = 0 ? true : false;  //当前资源池是否为空
     }
 
-    res *pop(const string &host, const string &user, const string &password, unsigned int port,bool boWait = true)//取出资源
+    res *pop(const string &host, const string &user, const string &password, unsigned int port, const string &ConnectedRunSQL = "", bool boWait = true) //取出资源
     {
       res *re = nullptr;
-      if (max <= 0) { return nullptr; }
+      if (max <= 0)
+        {
+          return nullptr;
+        }
       std::lock_guard<std::mutex> lock_pop(pop_mutex);//先对pop锁住
       string sKey = host + KeyFGF + user + KeyFGF + password + KeyFGF + to_string(port);
 
@@ -163,7 +179,7 @@ class DBMysql_Pool
                 if (max > allCount)//还可以再新建资源
                   {
                     re = Pool[sKey]->pop();
-					re->SetConnect(host, user, password, port);
+                    re->SetConnect(host, user, password, port, ConnectedRunSQL);
                     break;
                   }
                 else if (idleCount > 0)//有足够的空闲资源
@@ -184,7 +200,7 @@ class DBMysql_Pool
                       {
                         Pool[sk]->del_one_idleres();
                         re = Pool[sKey]->pop();
-						re->SetConnect(host, user, password, port);
+                        re->SetConnect(host, user, password, port, ConnectedRunSQL);
                         break;
                       }
                   }
@@ -233,9 +249,9 @@ class dbmysql_scoped_popres
   public:
     dbmysql_scoped_popres(DBMysql_Pool<res> &m_, const string &host,
                           const string &user, const string &password,
-                          unsigned int port, bool boWait = true) : m(&m_)
+                          unsigned int port, const string &ConnectedRunSQL = "", bool boWait = true) : m(&m_)
     {
-      r = m->pop(host, user, password, port, boWait);
+      r = m->pop(host, user, password, port, ConnectedRunSQL, boWait);
     }
     ~dbmysql_scoped_popres(void)
     {

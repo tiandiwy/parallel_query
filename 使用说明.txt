@@ -1,0 +1,51 @@
+parallel query使用 C++11编写的MariaDB 10的插件
+需要g++ 4.9以上版本 同时需要MariaDB客户端 C语言代码 如果安装过在/usr/include/mysql目录下就会有相关的头文件
+同时也要求在/usr/lib64目录下有/libmysqlclient_r.so文件 这个文件是mysql客户端的多线程安全的动态链接库
+执行auto.sh，脚本会先停止mysql服务，而后编译parallel_query.so文件 而后自动复制到/usr/lib64/mysql/plugin/目录下。再启动mysql服务器
+
+接着执行 install.sql 文件（要求每台节点都需要安装） 将插件中提供的函数注册到数据库中，并且在mysql库中新建 parallel_query_pri_fields表。
+parallel_query_pri_fields：作用是让用户可以指定数据库内某张表的分布字段（但必须是整数类型的字段），如果查询的表没有在parallel_query_pri_fields中有相应的记录，那么就会用当前表的整数类型的主键作为分布字段。
+在建立parallel_query_pri_fields表后，还会在mysql库内添加parallel_query、parallel_query_all、spider_pq、spider_pq_all四个存储过程。
+parallel_query_all：是本地并行查询的完全参数版存储过程，参数如下：
+	sHost：连接本机MariaDB的主机地址
+	sUserName：连接本机MariaDB的用户名
+	sPassword：连接本机MariaDB的密码
+	iPort：连接本机MariaDB的端口号
+	sDataBaseName：当前数据库名
+	in_sql：要执行的SQL语句
+	max_sql_count：最大SQL拆分数量，如果为0，那么就为当前电脑的CPU核数。
+	end_before：在汇总查询语句前添加的SQL语句 例如:”create table aa“等
+	end_sql：强制指定汇总的SQL语句 一般为空字符串，让系统自动生成
+	sTrueTableName：指定并行查询的主体表，如果为空字符串，系统会以in_sql的语句的第一表作为并行查询的主体表
+	sAsTableName：指定并行查询的主体表的别名，如果sTrueTableName和sAsTableName同时为空字符串，系统会自己处理
+	sPRIField：指定主体表的分布字段（但必须是整数类型的字段），如果为空字符串，那么系统会先查parallel_query_pri_fields，如果没有找到就会用当前表的整数类型的主键作为分布字段
+	iMin：指定主体表的分布字段的最小值，如果iMin和iMax都为0,那么系统会自动获取当前表的最大和最小值
+	iMax：指定主体表的分布字段的最大值，如果iMin和iMax都为0,那么系统会自动获取当前表的最大和最小值
+	sTempTableName：系统处理中需要的临时表名，如果为空字符串系统就会自动生成。
+	sEngineType：临时表的存储引擎的类型，如果为空字符串系统就会使用InnoDB。
+	sEngineConnection：保留
+	iClearTempTable：是否删除临时表
+
+parallel_query：是parallel_query_all的参数简化版本，其所有参数含义和parallel_query_all相同，同时spider_pq_all和spider_pq在具体执行的时候也会调用当地服务器上的parallel_query存储过程。
+
+spider_pq_all：是主要基于MariaDB的Spider存储引擎和FederatedX存储引擎，实现分布式并行查询的完全参数版存储过程，其能够将复杂而且反复嵌套的SQL分析后将整个查询过程分布到各个数据库节点后让每个节点都同时进行并行化查询最大限度利用整个集群的运算资源。参数如下：
+	sHost：连接本机MariaDB的主机地址
+	Username：连接本机MariaDB的用户名
+	sPassword：连接本机MariaDB的密码
+	iPort：连接本机MariaDB的端口号
+	Databasename：当前数据库名
+	inSQL：要执行的SQL语句
+	NewTable：新建临时表名的前缀
+	TempTableEngineType：临时表的存储引擎默认InnoDB
+	BeforeEndSQL:在汇总查询语句前添加的SQL语句 例如:”create table aa“等
+	MaxSQLCount：每个节点最大SQL拆分数量，如果为0，那么就为节点电脑的CPU核数。
+	TableWhere：对于需要采取分布运算的表的过滤条件 如果为空，那么值就自动为："`ENGINE` = 'SPIDER'"
+	PQFunction：节点服务器上的parallel_query存储过程的完整名称，如果为空，那么值就自动为：”mysql.parallel_query“
+	NeedLinkeTable：保留 默认为：1
+	OnlyTable：保留 默认为：0
+spider_pq：是spider_pq_all的参数简化版本，其所有参数含义和spider_pq_all相同
+
+parallel_query_all和parallel_query,提供当前节点并行SQL查询,为spider_pq_all和spider_pq等分布式并行查询提供基础，同时用户也可以在单机环境使用这个存储过程，不过其只会拆分SQL语句中的第一个表进行拆分形成多条并行SQL查询。对于嵌套SQL语句中其他表也需要拆分并行SQL查询，在集群环境下可以spider_pq_all和spider_pq，以及后面要提供的主主集群提供存储过程都已经自动支持，对于单机环境下也会提供新的存储过程来支持。
+
+使用示例：
+call mysql.spider_pq('localhost','root','123456','3306',DATABASE(),'select count(*) from aa','');
